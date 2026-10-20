@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LEVEL DEVIL — CYBER EDITION</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    height:100vh;display:grid;place-items:center;overflow:hidden;
+    background:#05060a;color:#e8ecf5;
+    font-family:"Segoe UI",system-ui,sans-serif;
+  }
+  #wrap{position:relative}
+  canvas{
+    display:block;border-radius:18px;
+    box-shadow:0 0 0 2px #1d2735,0 30px 90px rgba(0,255,255,.09),0 30px 90px rgba(0,0,0,.8);
+    background:#070a12;touch-action:none;
+  }
+  #hud{
+    position:absolute;top:14px;left:18px;right:18px;
+    display:flex;justify-content:space-between;gap:14px;
+    font-size:13px;letter-spacing:.6px;text-transform:uppercase;
+    pointer-events:none;
+  }
+  .chip{
+    background:rgba(8,12,20,.68);border:1px solid rgba(120,220,255,.18);
+    padding:7px 12px;border-radius:999px;backdrop-filter:blur(8px);
+    color:#b9e9ff;box-shadow:0 0 18px rgba(0,200,255,.08);
+  }
+  .chip b{color:#fff}
+  #overlay{
+    position:absolute;inset:0;display:grid;place-items:center;text-align:center;
+    background:radial-gradient(circle at 50% 35%,rgba(10,16,28,.82),rgba(3,5,9,.96));
+    border-radius:18px;
+  }
+  .panel{max-width:640px;padding:30px}
+  h1{
+    font-size:52px;line-height:1;margin-bottom:12px;
+    background:linear-gradient(90deg,#22d3ee,#a78bfa,#f472b6,#fbbf24);
+    -webkit-background-clip:text;background-clip:text;color:transparent;
+    filter:drop-shadow(0 0 22px rgba(56,189,248,.35));
+  }
+  .sub{opacity:.72;margin-bottom:22px;line-height:1.65;font-size:14px}
+  .keys{
+    display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-bottom:24px;
+  }
+  .key{
+    border:1px solid rgba(125,211,252,.25);background:rgba(12,20,32,.7);
+    padding:7px 11px;border-radius:9px;font-size:12px;color:#cdefff;
+  }
+  button{
+    border:0;border-radius:12px;padding:14px 30px;font-weight:800;font-size:16px;
+    cursor:pointer;color:#04121a;
+    background:linear-gradient(135deg,#22d3ee,#a78bfa);
+    box-shadow:0 10px 30px rgba(34,211,238,.28);
+  }
+  button:hover{transform:translateY(-2px)}
+  .touch{
+    position:absolute;bottom:16px;left:16px;right:16px;
+    display:none;justify-content:space-between;pointer-events:none;
+  }
+  .touch div{display:flex;gap:10px;pointer-events:auto}
+  .touch button{
+    width:64px;height:64px;border-radius:50%;padding:0;
+    background:rgba(15,25,40,.72);color:#dff6ff;font-size:20px;
+    border:1px solid rgba(125,211,252,.25);
+  }
+  @media(pointer:coarse){.touch{display:flex}}
+</style>
+</head>
+<body>
+
+<div id="wrap">
+  <canvas id="game" width="1080" height="600"></canvas>
+
+  <div id="hud">
+    <div style="display:flex;gap:10px">
+      <div class="chip">Level <b id="lv">1</b>/4</div>
+      <div class="chip">Deaths <b id="deaths">0</b></div>
+      <div class="chip">Time <b id="time">0.0</b>s</div>
+    </div>
+    <div style="display:flex;gap:10px">
+      <div class="chip">Coins <b id="coins">0</b></div>
+      <div class="chip">Dash <b id="dash">READY</b></div>
+      <div class="chip">Key <b id="keyState">NO</b></div>
+    </div>
+  </div>
+
+  <div id="overlay">
+    <div class="panel">
+      <h1>LEVEL DEVIL</h1>
+      <div class="sub">CYBER EDITION — survive the neon facility, collect coins, find the key, and escape.</div>
+      <div class="keys">
+        <span class="key">A / D — Move</span>
+        <span class="key">W / Space — Jump</span>
+        <span class="key">Double Jump</span>
+        <span class="key">Shift — Dash</span>
+        <span class="key">Wall Jump</span>
+        <span class="key">R — Restart</span>
+        <span class="key">P — Pause</span>
+      </div>
+      <button onclick="startGame()">ENTER FACILITY</button>
+    </div>
+  </div>
+
+  <div class="touch">
+    <div>
+      <button data-k="a">◀</button>
+      <button data-k="d">▶</button>
+    </div>
+    <div>
+      <button data-k="Shift">⚡</button>
+      <button data-k="w">▲</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const cv=document.getElementById("game"),ctx=cv.getContext("2d");
+const W=cv.width,H=cv.height;
+
+let P,level=0,deaths=0,coins=0,hasKey=false,running=false,paused=false;
+let solids,oneways,vanish,movers,crushers,saws,spikes,enemies,lasers,wind,zones,coinList,checks,door,keyItem;
+let particles=[],floaters=[],stars=[],buildings=[],tick=0,shake=0,flash=0,transition=0;
+const keys={};
+
+const GRAV=.62,JUMP=-12.4,MOVE=4.7,DASH=13.5,COYOTE=8,BUFFER=9,MAXFALL=17;
+
+const levels=[
+{
+  name:"NEON ENTRY",spawn:[60,470],door:[980,430],locked:false,
+  solids:[[0,520,1080,80],[230,440,150,20],[460,370,150,20],[700,300,150,20],[900,470,180,130]],
+  oneways:[[360,260,130,14]],
+  vanish:[[600,430,110,18,80,55]],
+  movers:[[770,180,120,18,2.6,0]],
+  crushers:[[880,0,80,55,280,3.2]],
+  saws:[[530,470,26],[760,270,24]],
+  spikes:[[390,500,70,20]],
+  enemies:[[300,410,110],[620,340,110]],
+  lasers:[[430,0,4,520,110,70]],
+  wind:[[250,150,300,220,0,-.16]],
+  zones:[],
+  coins:[[280,400],[500,330],[740,260],[830,140],[950,430]],
+  checks:[[250,490]]
+},
+{
+  name:"GRAVITY CORE",spawn:[60,470],door:[980,430],locked:true,reversed:true,
+  solids:[[0,520,220,80],[340,450,140,20],[580,380,140,20],[810,500,270,100]],
+  oneways:[[450,290,130,14]],
+  vanish:[[690,260,110,18,70,45]],
+  movers:[[300,220,120,18,0,-2.3]],
+  crushers:[[130,0,85,55,320,2.7]],
+  saws:[[420,420,24],[660,350,24]],
+  spikes:[[230,500,100,20],[540,360,40,20]],
+  enemies:[[360,420,110],[620,350,110]],
+  lasers:[[560,0,4,560,130,80]],
+  wind:[[600,100,330,240,0,-.18]],
+  zones:[[820,300,240,220,"gravity"]],
+  coins:[[280,410],[490,340],[720,290],[860,240],[950,440]],
+  checks:[[360,490]],
+  key:[520,230]
+},
+{
+  name:"LASER GAUNTLET",spawn:[60,470],door:[980,430],locked:false,
+  solids:[[0,520,160,80],[260,470,110,20],[450,420,110,20],[640,370,110,20],[830,480,250,120]],
+  oneways:[[330,340,110,14],[560,270,110,14]],
+  vanish:[[760,270,100,18,60,40]],
+  movers:[[190,290,110,18,2.7,0],[630,190,110,18,-2.7,0]],
+  crushers:[[400,0,75,55,360,3.5]],
+  saws:[[240,440,22],[470,390,22],[700,340,22]],
+  spikes:[[170,500,70,20],[580,350,50,20]],
+  enemies:[[280,440,100],[500,390,100],[680,340,100]],
+  lasers:[[350,0,4,540,90,60],[650,0,4,560,120,70]],
+  wind:[],
+  zones:[[250,120,300,200,"lowgrav"]],
+  coins:[[300,430],[490,380],[690,330],[820,230],[950,440]],
+  checks:[[270,500],[460,450]]
+},
+{
+  name:"DEVIL FINALE",spawn:[60,470],door:[980,430],locked:true,reversed:true,
+  solids:[[0,520,140,80],[220,480,100,20],[400,430,100,20],[580,380,100,20],[760,330,100,20],[900,480,180,120]],
+  oneways:[[300,370,100,14],[520,300,100,14],[700,240,100,14]],
+  vanish:[[830,220,90,18,70,45]],
+  movers:[[150,300,100,18,3,0],[460,230,100,18,-3,0],[730,160,100,18,2.5,0]],
+  crushers:[[260,0,75,55,430,4],[540,0,75,55,370,3.4],[810,0,75,55,310,3]],
+  saws:[[190,450,22],[370,400,22],[550,350,22],[710,300,22]],
+  spikes:[[150,500,60,20],[330,460,40,20],[510,410,40,20],[690,360,40,20]],
+  enemies:[[240,450,90],[440,400,90],[620,350,90],[790,300,90]],
+  lasers:[[320,0,4,540,80,55],[600,0,4,560,100,65],[880,0,4,560,120,75]],
+  wind:[[350,90,350,220,0,-.2]],
+  zones:[[150,120,280,200,"lowgrav"],[700,120,330,220,"gravity"]],
+  coins:[[250,440],[430,390],[610,340],[790,290],[900,220],[960,440]],
+  checks:[[230,500],[420,450],[610,400]],
+  key:[860,180]
+}
+];
+
+const R=(x,y,w,h)=>({x,y,w,h});
+const hit=(a,b)=>a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y;
+
+/* ---------- AUDIO ---------- */
+let AC;
+function beep(freq,dur=.08,type="square",vol=.05){
+  try{
+    AC=AC||new (window.AudioContext||window.webkitAudioContext)();
+    const o=AC.createOscillator(),g=AC.createGain();
+    o.type=type;o.frequency.value=freq;
+    g.gain.setValueAtTime(vol,AC.currentTime);
+    g.gain.exponentialRampToValueAtTime(.0001,AC.currentTime+dur);
+    o.connect(g);g.connect(AC.destination);
+    o.start();o.stop(AC.currentTime+dur);
+  }catch(e){}
+}
+
+/* ---------- EFFECTS ---------- */
+function burst(x,y,color,n=16,power=7){
+  for(let i=0;i<n;i++)particles.push({
+    x,y,vx:(Math.random()-.5)*power*2,vy:(Math.random()-.5)*power*2,
+    life:22+Math.random()*22,max:44,color,size:2+Math.random()*3
+  });
+}
+function floatText(x,y,text,color){
+  floaters.push({x,y,text,color,life:55});
+}
+
+/* ---------- LEVEL ---------- */
+function loadLevel(i){
+  const L=levels[i];
+  P={x:L.spawn[0],y:L.spawn[1],w:26,h:36,vx:0,vy:0,grounded:false,
+     coyote:0,buffer:0,jumps:0,maxJumps:2,dashCd:0,dashing:0,dashDir:1,
+     wall:0,wallCd:0,checkpoint:[...L.spawn],facing:1,squash:1,grav:1};
+  solids=L.solids.map(a=>R(...a));
+  oneways=L.oneways.map(a=>R(...a));
+  vanish=L.vanish.map(a=>({...R(a[0],a[1],a[2],a[3]),timer:a[4],cooldown:a[5],active:true,used:0}));
+  movers=L.movers.map(a=>({...R(a[0],a[1],a[2],a[3]),vx:a[4],vy:a[5],ox:a[0],oy:a[1]}));
+  crushers=L.crushers.map(a=>({x:a[0],y:a[1],w:a[2],h:a[3],bottom:a[4],speed:a[5],phase:Math.random()*100}));
+  saws=L.saws.map(a=>({x:a[0],y:a[1],r:a[2],a:Math.random()*6}));
+  spikes=L.spikes.map(a=>R(...a));
+  enemies=L.enemies.map(a=>({x:a[0],y:a[1],w:30,h:30,min:a[0],max:a[0]+a[2],dir:1,dead:false}));
+  lasers=L.lasers.map(a=>({x:a[0],y:a[1],w:a[2],h:a[3],period:a[4],offset:a[5]}));
+  wind=L.wind.map(a=>({x:a[0],y:a[1],w:a[2],h:a[3],fx:a[4],fy:a[5]}));
+  zones=L.zones.map(a=>({x:a[0],y:a[1],w:a[2],h:a[3],type:a[4]}));
+  coinList=L.coins.map(a=>({...R(a[0],a[1],18,18),got:false,ph:Math.random()*6}));
+  checks=L.checks.map(a=>({...R(a[0],a[1],24,30),active:false}));
+  door=R(L.door[0],L.door[1],40,66);
+  keyItem=L.key?{...R(L.key[0],L.key[1],22,22),got:false}:null;
+  hasKey=!L.locked;
+  document.getElementById("lv").textContent=i+1;
+  document.getElementById("keyState").textContent=hasKey?"YES":"NO";
+  floatText(W/2,140,L.name,"#7dd3fc");
+}
+
+function die(){
+  deaths++;shake=16;flash=10;
+  document.getElementById("deaths").textContent=deaths;
+  burst(P.x+P.w/2,P.y+P.h/2,"#ff5d6c",32,9);
+  beep(160,.22,"sawtooth",.08);
+  P.x=P.checkpoint[0];P.y=P.checkpoint[1];
+  P.vx=P.vy=0;P.dashing=0;P.dashCd=0;P.jumps=0;P.grav=1;
+}
+
+function nextLevel(){
+  level++;transition=26;
+  burst(P.x+P.w/2,P.y+P.h/2,"#4ade80",34,9);
+  beep(720,.12,"triangle",.07);
+  setTimeout(()=>beep(980,.16,"triangle",.07),110);
+  if(level>=levels.length){
+    running=false;
+    const o=document.getElementById("overlay");
+    o.style.display="grid";
+    o.innerHTML=`<div class="panel">
+      <h1>FACILITY CLEARED</h1>
+      <div class="sub">Deaths: ${deaths}<br>Coins: ${coins}<br>Time: ${(performance.now()-startTime)/1000|0}s</div>
+      <button onclick="location.reload()">PLAY AGAIN</button></div>`;
+    return;
+  }
+  loadLevel(level);
+}
+
+function startGame(){
+  document.getElementById("overlay").style.display="none";
+  level=0;deaths=0;coins=0;startTime=performance.now();
+  document.getElementById("deaths").textContent=0;
+  document.getElementById("coins").textContent=0;
+  loadLevel(0);running=true;paused=false;loop();
+}
+let startTime=0;
+
+/* ---------- UPDATE ---------- */
+function update(){
+  tick++;
+  document.getElementById("time").textContent=((performance.now()-startTime)/1000).toFixed(1);
+
+  let left=keys["a"]||keys["ArrowLeft"],right=keys["d"]||keys["ArrowRight"];
+  if(levels[level].reversed)[left,right]=[right,left];
+
+  if(P.dashCd>0)P.dashCd--;
+  if(P.wallCd>0)P.wallCd--;
+  if(keys["Shift"]&&!P.dashCd&&!P.dashing){
+    P.dashing=10;P.dashCd=55;
+    P.dashDir=right?1:left?-1:P.facing;
+    burst(P.x+P.w/2,P.y+P.h/2,"#22d3ee",18,8);
+    beep(520,.1,"square",.05);
+  }
+
+  let inWind=wind.some(w=>hit(P,w));
+  let lowGrav=zones.some(z=>z.type==="lowgrav"&&hit(P,z));
+  let flip=zones.some(z=>z.type==="gravity"&&hit(P,z));
+  P.grav=flip?-1:1;
+
+  if(P.dashing>0){
+    P.dashing--;P.vx=P.dashDir*DASH;P.vy=0;
+  }else{
+    P.vx=(right?MOVE:0)-(left?MOVE:0);
+    if(right)P.facing=1;if(left)P.facing=-1;
+    P.vy+=GRAV*(lowGrav?.55:1)*P.grav;
+    P.vy=Math.max(-MAXFALL,Math.min(MAXFALL,P.vy));
+    if(inWind){P.vx+=wind.find(w=>hit(P,w)).fx*3;P.vy+=wind.find(w=>hit(P,w)).fy;}
+  }
+
+  if(keys["w"]||keys["ArrowUp"]||keys[" "])P.buffer=BUFFER;
+  if(P.buffer>0)P.buffer--;
+
+  const canJump=P.grounded||P.coyote>0;
+  if(P.buffer>0&&(canJump||P.wall)){
+    if(P.wall&&!canJump){
+      P.vy=JUMP*.95*P.grav;P.vx=-P.wall*MOVE*1.4;P.wallCd=12;
+      burst(P.x+P.w/2,P.y+P.h/2,"#a78bfa",12);
+    }else{
+      P.vy=JUMP*P.grav;P.jumps=1;
+    }
+    P.buffer=0;P.coyote=0;P.grounded=false;P.squash=.75;
+    beep(360,.07,"square",.04);
+  }else if(P.buffer>0&&P.jumps<P.maxJumps){
+    P.vy=JUMP*.9*P.grav;P.jumps++;P.buffer=0;
+    burst(P.x+P.w/2,P.y+P.h/2,"#7dd3fc",14);
+    beep(520,.07,"square",.04);
+  }
+
+  if(!keys["w"]&&!keys["ArrowUp"]&&!keys[" "]&&Math.abs(P.vy)>4&&!P.dashing)
+    P.vy=4*P.grav;
+
+  const oldBottom=P.y+P.h;
+  P.x+=P.vx;P.y+=P.vy;
+  P.grounded=false;P.wall=0;
+
+  const all=[...solids,...movers,...vanish.filter(v=>v.active)];
+  for(const s of all){
+    if(!hit(P,s))continue;
+    if(P.grav===1&&P.vy>=0&&oldBottom<=s.y+8){
+      P.y=s.y-P.h;P.vy=0;P.grounded=true;P.coyote=COYOTE;P.jumps=0;P.squash=1.2;
+    }else if(P.grav===-1&&P.vy<=0&&P.y>=s.y+s.h-8){
+      P.y=s.y+s.h;P.vy=0;P.grounded=true;P.coyote=COYOTE;P.jumps=0;
+    }else if(P.vy*P.grav<0){
+      P.y=P.grav===1?s.y+s.h:s.y-P.h;P.vy=0;
+    }else if(P.vx>0){P.x=s.x-P.w;if(!P.wallCd)P.wall=1;}
+    else if(P.vx<0){P.x=s.x+s.w;if(!P.wallCd)P.wall=-1;}
+  }
+
+  for(const o of oneways){
+    if(P.grav===1&&P.vy>=0&&oldBottom<=o.y+6&&hit(P,o)){
+      P.y=o.y-P.h;P.vy=0;P.grounded=true;P.coyote=COYOTE;P.jumps=0;
+    }
+  }
+
+  for(const v of vanish){
+    if(v.active&&hit(P,v)){
+      if(++v.used>12){
+        v.active=false;burst(v.x+v.w/2,v.y+v.h/2,"#a78bfa",18);
+        setTimeout(()=>{v.active=true;v.used=0;},v.timer);
+      }
+    }
+  }
+
+  for(const m of movers){
+    m.x+=m.vx;m.y+=m.vy;
+    if(Math.abs(m.x-m.ox)>130)m.vx*=-1;
+    if(Math.abs(m.y-m.oy)>110)m.vy*=-1;
+    if(hit(P,m)&&P.grav===1&&P.vy>=0&&oldBottom<=m.y+10){
+      P.y=m.y-P.h;P.vy=0;P.x+=m.vx;
+      P.grounded=true;P.coyote=COYOTE;P.jumps=0;
+    }
+  }
+
+  for(const c of crushers){
+    c.phase+=c.speed*.015;
+    c.y=c.h+(Math.sin(c.phase)*.5+.5)*c.bottom;
+    if(hit(P,c))die();
+  }
+
+  for(const s of saws){
+    s.a+=.24;
+    if(Math.hypot(P.x+P.w/2-s.x,P.y+P.h/2-s.y)<s.r+15)die();
+  }
+
+  for(const s of spikes)if(hit(P,s))die();
+
+  for(const e of enemies){
+    if(e.dead)continue;
+    e.x+=e.dir*1.5;
+    if(e.x<e.min||e.x+e.w>e.max)e.dir*=-1;
+    if(hit(P,e)){
+      if(P.vy>2&&P.y+P.h<e.y+18){
+        e.dead=true;P.vy=JUMP*.75;P.jumps=0;
+        burst(e.x+15,e.y+15,"#f472b6",22,8);
+        floatText(e.x,e.y,"STOMPED","#f472b6");
+        beep(220,.12,"sawtooth",.06);shake=8;
+      }else die();
+    }
+  }
+
+  for(const l of lasers){
+    c
